@@ -1,6 +1,5 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { createProxyMiddleware } from "http-proxy-middleware";
 import { spawn } from "child_process";
 import { storage } from "./storage";
 
@@ -9,38 +8,106 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Start the Python Flask server for the downloader logic
-  // We run it on port 5001 to avoid conflict with the main Node server on 5000
-  console.log("Starting Python backend...");
-  
-  // Install flask first if needed (though we expect it to be installed via requirements or manual step)
-  // For robustness in this environment, we'll assume 'pip install flask flask-cors' is run or available.
-  // We'll try to run the python script.
-  const pythonProcess = spawn('python3', ['server/app.py'], {
-    stdio: 'inherit' // Pipe output to parent console for debugging
-  });
+  const get_video_info = (url: string): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const cmd = [
+        'yt-dlp',
+        '-J',
+        '--no-playlist',
+        '--flat-playlist',
+        '--socket-timeout', '60',
+        '-f', 'bestaudio/best',
+        url
+      ];
+      const process = spawn('yt-dlp', cmd.slice(1));
+      let stdout = '';
+      let stderr = '';
 
-  pythonProcess.on('error', (err) => {
-    console.error('Failed to start Python backend:', err);
-  });
-  
-  // Proxy /play and /download to Python
-  const proxy = createProxyMiddleware({
-    target: 'http://127.0.0.1:5001',
-    changeOrigin: true,
-    proxyTimeout: 120000, // Timeout for the proxy itself
-    on: {
-      error: (err: any, _req: any, res: any) => {
-        console.error("Proxy error:", err);
-        if (!res.headersSent) {
-          res.status(502).json({ status: false, error: "Backend service unavailable or timed out" });
+      process.stdout.on('data', (data) => stdout += data);
+      process.stderr.on('data', (data) => stderr += data);
+
+      process.on('close', (code) => {
+        if (code !== 0) {
+          return reject(new Error(`yt-dlp error: ${stderr}`));
+        }
+        try {
+          resolve(JSON.parse(stdout));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  };
+
+  app.get('/play', async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ status: false, error: "URL is required" });
+
+    try {
+      const videoData = await get_video_info(url);
+      let audioUrl = videoData.url;
+      
+      if (!audioUrl && videoData.formats) {
+        const audioFormats = videoData.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
+        if (audioFormats.length > 0) {
+          audioUrl = audioFormats.sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0))[0].url;
         }
       }
+
+      if (!audioUrl) throw new Error("Could not extract audio stream");
+
+      res.json({
+        status: true,
+        title: videoData.title || 'Unknown Title',
+        duration: videoData.duration || 0,
+        author: videoData.uploader || 'Unknown Artist',
+        thumbnail: videoData.thumbnail || '',
+        audio: audioUrl,
+        id: videoData.id
+      });
+    } catch (error: any) {
+      res.status(500).json({ status: false, error: error.message });
     }
   });
 
-  app.get('/play', proxy);
-  app.get('/download', proxy);
+  app.get('/download', async (req, res) => {
+    const url = req.query.url as string;
+    if (!url) return res.status(400).json({ status: false, error: "URL is required" });
+
+    try {
+      const videoData = await get_video_info(url);
+      let audioUrl = videoData.url;
+      
+      if (!audioUrl && videoData.formats) {
+        const audioFormats = videoData.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
+        if (audioFormats.length > 0) {
+          audioUrl = audioFormats.sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0))[0].url;
+        }
+      }
+
+      if (!audioUrl) throw new Error("Could not get audio URL");
+
+      const title = videoData.title || 'audio';
+      const asciiTitle = title.replace(/[^\x00-\x7F]/g, "").replace(/[^\w\s._-]/g, "").trim() || "audio";
+
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiTitle}.mp3"`);
+      res.setHeader('Content-Type', 'audio/mpeg');
+
+      const ytProcess = spawn('yt-dlp', [
+        '-o', '-',
+        '-f', 'bestaudio/best',
+        '--socket-timeout', '60',
+        url
+      ]);
+
+      ytProcess.stdout.pipe(res);
+      ytProcess.stderr.on('data', (data) => console.error(`yt-dlp download stderr: ${data}`));
+
+      res.on('close', () => ytProcess.kill());
+    } catch (error: any) {
+      res.status(500).json({ status: false, error: error.message });
+    }
+  });
 
   // Health check/Root endpoint
   app.get('/', (req, res) => {
