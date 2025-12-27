@@ -81,7 +81,9 @@ export async function registerRoutes(
     if (!url) return res.status(400).json({ status: false, error: "URL is required" });
 
     try {
+      console.log(`[Download] Starting for URL: ${url}`);
       const videoData = await get_video_info(url);
+      console.log(`[Download] Metadata extracted: ${videoData.title}`);
       let audioUrl = videoData.url;
       
       if (!audioUrl && videoData.formats) {
@@ -98,20 +100,35 @@ export async function registerRoutes(
 
       res.setHeader('Content-Disposition', `attachment; filename="${asciiTitle}.mp3"`);
       res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Transfer-Encoding', 'chunked');
 
       const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
       const ytProcess = spawn(ytDlpPath, [
         '-o', '-',
         '-f', 'bestaudio/best',
+        '--no-part',
+        '--buffer-size', '16K',
         '--socket-timeout', '60',
         url
       ]);
 
-      // Use a more robust piping with error handling
-      ytProcess.stdout.pipe(res);
+      console.log(`[Download] yt-dlp process spawned (PID: ${ytProcess.pid})`);
+
+      ytProcess.stdout.on('data', (chunk) => {
+        if (!res.writableEnded) {
+          res.write(chunk);
+        }
+      });
+
+      ytProcess.stdout.on('end', () => {
+        console.log(`[Download] stdout ended`);
+        if (!res.writableEnded) {
+          res.end();
+        }
+      });
       
       ytProcess.on('error', (err) => {
-        console.error('yt-dlp spawn error:', err);
+        console.error('[Download] yt-dlp spawn error:', err);
         if (!res.headersSent) {
           res.status(500).json({ status: false, error: "Failed to start downloader" });
         }
@@ -120,16 +137,23 @@ export async function registerRoutes(
       ytProcess.stderr.on('data', (data) => {
         const message = data.toString();
         if (message.includes('ERROR')) {
-          console.error(`yt-dlp error: ${message}`);
+          console.error(`[Download] yt-dlp error: ${message}`);
+        } else {
+          console.log(`[Download] yt-dlp progress: ${message.trim().split('\n')[0]}`);
         }
       });
 
       res.on('close', () => {
-        if (ytProcess) ytProcess.kill();
+        console.log(`[Download] Client connection closed`);
+        if (ytProcess) {
+          ytProcess.stdout.unpipe();
+          ytProcess.kill('SIGTERM');
+        }
       });
 
       ytProcess.on('close', (code) => {
-        if (code !== 0 && !res.headersSent) {
+        console.log(`[Download] yt-dlp exited with code ${code}`);
+        if (code !== 0 && !res.headersSent && !res.writableEnded) {
           res.status(500).json({ status: false, error: "Downloader exited with error" });
         }
       });
