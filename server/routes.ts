@@ -100,10 +100,32 @@ export async function registerRoutes(
         url
       ]);
 
+      // Use a more robust piping with error handling
       ytProcess.stdout.pipe(res);
-      ytProcess.stderr.on('data', (data) => console.error(`yt-dlp download stderr: ${data}`));
+      
+      ytProcess.on('error', (err) => {
+        console.error('yt-dlp spawn error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ status: false, error: "Failed to start downloader" });
+        }
+      });
 
-      res.on('close', () => ytProcess.kill());
+      ytProcess.stderr.on('data', (data) => {
+        const message = data.toString();
+        if (message.includes('ERROR')) {
+          console.error(`yt-dlp error: ${message}`);
+        }
+      });
+
+      res.on('close', () => {
+        if (ytProcess) ytProcess.kill();
+      });
+
+      ytProcess.on('close', (code) => {
+        if (code !== 0 && !res.headersSent) {
+          res.status(500).json({ status: false, error: "Downloader exited with error" });
+        }
+      });
     } catch (error: any) {
       res.status(500).json({ status: false, error: error.message });
     }
