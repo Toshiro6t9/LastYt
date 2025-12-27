@@ -43,6 +43,17 @@ async function getAudioUrl(youtubeUrl) {
   });
 }
 
+// Home endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: "NodeJS Audio API is running",
+    endpoints: {
+      "/play": "/play?url=YOUTUBE_URL",
+      "/download": "/download?url=YOUTUBE_URL"
+    }
+  });
+});
+
 // Streaming endpoint
 app.get('/play', async (req, res) => {
   const videoUrl = req.query.url;

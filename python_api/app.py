@@ -42,6 +42,16 @@ def get_audio_url(youtube_url):
         logger.error(f"Unexpected error in get_audio_url: {str(e)}")
         return None
 
+@app.route('/')
+def home():
+    return {
+        "message": "YouTube Audio API is running",
+        "endpoints": {
+            "/play": "/play?url=YOUTUBE_URL",
+            "/download": "/download?url=YOUTUBE_URL"
+        }
+    }
+
 @app.route('/play')
 def play():
     """
