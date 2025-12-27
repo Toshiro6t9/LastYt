@@ -37,13 +37,26 @@ def play():
             'yt-dlp',
             '-J',
             '--no-playlist',
-            '-f', 'bestaudio',
+            '--flat-playlist',
+            '-f', 'bestaudio/best',
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--get-url',
+            youtube_url
+        ]
+        
+        # Actually, let's use the more reliable way to get metadata + direct URL
+        metadata_cmd = [
+            'yt-dlp',
+            '-J',
+            '--no-playlist',
+            '--flat-playlist',
             youtube_url
         ]
 
-        # Execute yt-dlp via subprocess
+        # Execute yt-dlp via subprocess for metadata
         process = subprocess.run(
-            cmd,
+            metadata_cmd,
             capture_output=True,
             text=True,
             check=False
@@ -57,16 +70,28 @@ def play():
         # Parse the JSON output from yt-dlp
         video_data = json.loads(process.stdout)
         
+        # Get the direct audio URL specifically
+        direct_url_cmd = [
+            'yt-dlp',
+            '-f', 'bestaudio',
+            '-g',
+            youtube_url
+        ]
+        
+        url_process = subprocess.run(
+            direct_url_cmd,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        audio_url = url_process.stdout.strip() if url_process.returncode == 0 else video_data.get('url')
+        
         # Extract required fields
         title = video_data.get('title', 'Unknown Title')
         duration = video_data.get('duration', 0)
         uploader = video_data.get('uploader', 'Unknown Artist')
         thumbnail = video_data.get('thumbnail', '')
-        
-        # Get the direct audio URL
-        # yt-dlp JSON output usually has 'url' field for the direct stream in the root 
-        # or we look into 'formats' if needed, but -f bestaudio usually selects one.
-        audio_url = video_data.get('url')
         
         if not audio_url:
             return jsonify({"status": False, "error": "Could not extract audio stream"}), 404
