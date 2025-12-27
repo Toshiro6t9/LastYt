@@ -42,10 +42,6 @@ def get_audio_url(youtube_url):
         logger.error(f"Unexpected error in get_audio_url: {str(e)}")
         return None
 
-@app.route('/')
-def home():
-    return "YouTube Audio API is running on port 10527"
-
 @app.route('/play')
 def play():
     """
@@ -133,5 +129,5 @@ def download():
         return {"error": str(e)}, 500
 
 if __name__ == '__main__':
-    # Fixed to port 10527 and binding to 0.0.0.0 for external access
+    # Updated to port 10527
     app.run(host='0.0.0.0', port=10527, threaded=True)

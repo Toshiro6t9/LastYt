@@ -1,137 +1,123 @@
-from flask import Flask, request, Response, stream_with_context
+import os
+import sys
 import subprocess
-import requests
-import re
+import json
 import logging
+from flask import Flask, request, jsonify, Response, stream_with_context
+from flask_cors import CORS
+import requests
 
-# Configure logging to track API usage and errors
+app = Flask(__name__)
+CORS(app)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-
-def get_audio_url(youtube_url):
-    """
-    Uses yt-dlp to extract the direct audio URL from a YouTube link.
-    Bypasses signature/throttling using common browser user-agents.
-    """
+# Re-use the same downloader logic for both /play and /download
+def get_video_info(url):
     try:
-        # Command to get the best audio URL directly from YouTube's CDN
+        # Get metadata and direct URL in one go if possible
         cmd = [
             'yt-dlp',
-            '--no-check-certificate',
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '-J',
+            '--no-playlist',
+            '--flat-playlist',
             '-f', 'bestaudio/best',
-            '--get-url',
-            '--no-warnings',
-            youtube_url
+            url
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-        url = result.stdout.strip()
-        if not url:
-            logger.error("yt-dlp extraction failed: empty output")
-            return None
-        return url
-    except subprocess.TimeoutExpired:
-        logger.error("yt-dlp extraction timed out (30s limit)")
-        return None
-    except subprocess.CalledProcessError as e:
-        logger.error(f"yt-dlp error: {e.stderr}")
-        return None
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        if process.returncode != 0:
+            return None, f"yt-dlp error: {process.stderr}"
+        
+        data = json.loads(process.stdout)
+        return data, None
     except Exception as e:
-        logger.error(f"Unexpected error in get_audio_url: {str(e)}")
-        return None
+        return None, str(e)
 
-@app.route('/')
-def home():
-    return "YouTube Audio API is running on port 10527"
-
-@app.route('/play')
+@app.route('/play', methods=['GET'])
 def play():
-    """
-    Endpoint: /play?url=<YOUTUBE_URL>
-    Streams audio directly to the user in 4KB chunks for memory efficiency.
-    Compatible with Discord/Messenger bots and HTML5 players.
-    """
-    video_url = request.args.get('url')
-    if not video_url:
-        return {"error": "Missing 'url' parameter. Usage: /play?url=YOUTUBE_URL"}, 400
+    youtube_url = request.args.get('url')
+    if not youtube_url:
+        return jsonify({"status": False, "error": "URL is required"}), 400
 
-    if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', video_url):
-        return {"error": "Invalid YouTube URL format"}, 400
-
-    logger.info(f"Extracting stream URL for: {video_url}")
-    direct_url = get_audio_url(video_url)
+    logger.info(f"Play: {youtube_url}")
+    video_data, error = get_video_info(youtube_url)
     
-    if not direct_url:
-        return {"error": "Failed to extract direct audio URL. Video might be restricted."}, 500
+    if error:
+        return jsonify({"status": False, "error": error}), 400
+
+    # Get the best audio URL from formats or the root
+    audio_url = video_data.get('url')
+    if not audio_url and 'formats' in video_data:
+        # Filter for audio-only formats
+        audio_formats = [f for f in video_data['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        if audio_formats:
+            # Pick the best quality audio
+            audio_url = sorted(audio_formats, key=lambda x: x.get('abr', 0) or 0, reverse=True)[0].get('url')
+
+    if not audio_url:
+        return jsonify({"status": False, "error": "Could not extract audio stream"}), 404
+
+    return jsonify({
+        "status": True,
+        "title": video_data.get('title', 'Unknown Title'),
+        "duration": video_data.get('duration', 0),
+        "author": video_data.get('uploader', 'Unknown Artist'),
+        "thumbnail": video_data.get('thumbnail', ''),
+        "audio": audio_url,
+        "id": video_data.get('id')
+    })
+
+@app.route('/download', methods=['GET'])
+def download():
+    youtube_url = request.args.get('url')
+    if not youtube_url:
+        return jsonify({"status": False, "error": "URL is required"}), 400
+
+    logger.info(f"Download: {youtube_url}")
+    video_data, error = get_video_info(youtube_url)
+    
+    if error:
+        return jsonify({"status": False, "error": error}), 400
+
+    audio_url = video_data.get('url')
+    if not audio_url and 'formats' in video_data:
+        audio_formats = [f for f in video_data['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        if audio_formats:
+            audio_url = sorted(audio_formats, key=lambda x: x.get('abr', 0) or 0, reverse=True)[0].get('url')
+
+    if not audio_url:
+        return jsonify({"status": False, "error": "Could not get audio URL"}), 400
 
     try:
-        # Request stream from YouTube CDN with browser headers
-        headers_to_use = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Connection': 'keep-alive'
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        req = requests.get(direct_url, stream=True, timeout=15, headers=headers_to_use)
+        # Use a longer timeout and better error handling for the request
+        req = requests.get(audio_url, stream=True, headers=headers, timeout=60)
         req.raise_for_status()
         
         def generate():
-            # Memory-safe chunked reading
-            for chunk in req.iter_content(chunk_size=4096):
+            for chunk in req.iter_content(chunk_size=1024 * 64):
                 if chunk:
                     yield chunk
 
-        # Proxy essential headers to ensure player compatibility
-        headers = {
-            'Content-Type': req.headers.get('Content-Type', 'audio/mpeg'),
-            'Content-Length': req.headers.get('Content-Length'),
-            'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
-        }
-
-        return Response(stream_with_context(generate()), headers=headers)
-
+        title = video_data.get('title', 'audio')
+        safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '.', '_')]).strip()
+        if not safe_title:
+            safe_title = "audio"
+        
+        return Response(
+            stream_with_context(generate()),
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{safe_title}.mp3\"",
+                "Content-Type": "audio/mpeg",
+                "Content-Length": req.headers.get('Content-Length')
+            }
+        )
     except Exception as e:
-        logger.error(f"Streaming failed: {str(e)}")
-        return {"error": "Upstream connection error during streaming"}, 502
-
-@app.route('/download')
-def download():
-    """
-    Endpoint: /download?url=<YOUTUBE_URL>
-    Identical to /play but forces browser 'Save As' dialog.
-    """
-    video_url = request.args.get('url')
-    if not video_url:
-        return {"error": "Missing 'url' parameter"}, 400
-
-    direct_url = get_audio_url(video_url)
-    if not direct_url:
-        return {"error": "Extraction failed"}, 500
-
-    try:
-        req = requests.get(direct_url, stream=True, timeout=15, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        })
-        req.raise_for_status()
-
-        def generate():
-            for chunk in req.iter_content(chunk_size=4096):
-                yield chunk
-
-        # Force attachment header
-        headers = {
-            'Content-Type': 'audio/mpeg',
-            'Content-Disposition': 'attachment; filename="audio.mp3"',
-            'Content-Length': req.headers.get('Content-Length'),
-            'Cache-Control': 'no-cache'
-        }
-
-        return Response(stream_with_context(generate()), headers=headers)
-    except Exception as e:
-        return {"error": str(e)}, 500
+        logger.exception("Download streaming error")
+        return jsonify({"status": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Fixed to port 10527 and binding to 0.0.0.0 for external access
-    app.run(host='0.0.0.0', port=10527, threaded=True)
+    app.run(host='0.0.0.0', port=5001)

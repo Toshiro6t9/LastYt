@@ -26,7 +26,7 @@ export async function registerRoutes(
   
   // Proxy /play and /download to Python
   const proxy = createProxyMiddleware({
-    target: 'http://127.0.0.1:10527',
+    target: 'http://127.0.0.1:5001',
     changeOrigin: true,
     onError: (err, req, res) => {
       console.error("Proxy error:", err);
