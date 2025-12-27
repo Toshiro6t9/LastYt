@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const axios = require('axios');
 
 const app = express();
-const port = 5002;
+const port = process.env.PORT || 5002;
 
 async function getAudioUrl(youtubeUrl) {
   return new Promise((resolve, reject) => {

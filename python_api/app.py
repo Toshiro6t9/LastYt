@@ -136,4 +136,7 @@ def download():
         return {"error": "An internal error occurred during download"}, 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, threaded=True)
+    # Use PORT environment variable if available (standard for Render/Heroku/etc)
+    port = int(os.environ.get('PORT', 5001))
+    print(f"Python Audio API is starting on http://0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port, threaded=True)
