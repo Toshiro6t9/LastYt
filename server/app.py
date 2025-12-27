@@ -13,71 +13,60 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@app.route('/play', methods=['GET'])
-def play():
-    youtube_url = request.args.get('url')
-    
-    if not youtube_url:
-        return jsonify({"status": False, "error": "URL is required"}), 400
-
-    logger.info(f"Processing URL for play: {youtube_url}")
-
+# Re-use the same downloader logic for both /play and /download
+def get_video_info(url):
     try:
-        # Get metadata
-        metadata_cmd = [
+        # Get metadata and direct URL in one go if possible
+        cmd = [
             'yt-dlp',
             '-J',
             '--no-playlist',
             '--flat-playlist',
-            youtube_url
+            '-f', 'bestaudio/best',
+            url
         ]
-
-        process = subprocess.run(
-            metadata_cmd,
-            capture_output=True,
-            text=True,
-            check=False
-        )
-
+        process = subprocess.run(cmd, capture_output=True, text=True)
         if process.returncode != 0:
-            logger.error(f"yt-dlp metadata error: {process.stderr}")
-            return jsonify({"status": False, "error": "Failed to fetch video info."}), 400
-
-        video_data = json.loads(process.stdout)
+            return None, f"yt-dlp error: {process.stderr}"
         
-        # Get direct audio URL
-        direct_url_cmd = [
-            'yt-dlp',
-            '-f', 'bestaudio',
-            '-g',
-            youtube_url
-        ]
-        
-        url_process = subprocess.run(
-            direct_url_cmd,
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        
-        audio_url = url_process.stdout.strip() if url_process.returncode == 0 else video_data.get('url')
-        
-        if not audio_url:
-            return jsonify({"status": False, "error": "Could not extract audio stream"}), 404
-
-        return jsonify({
-            "status": True,
-            "title": video_data.get('title', 'Unknown Title'),
-            "duration": video_data.get('duration', 0),
-            "author": video_data.get('uploader', 'Unknown Artist'),
-            "thumbnail": video_data.get('thumbnail', ''),
-            "audio": audio_url,
-            "id": video_data.get('id')
-        })
-
+        data = json.loads(process.stdout)
+        return data, None
     except Exception as e:
-        logger.exception("Unexpected error in /play")
-        return jsonify({"status": False, "error": str(e)}), 500
+        return None, str(e)
+
+@app.route('/play', methods=['GET'])
+def play():
+    youtube_url = request.args.get('url')
+    if not youtube_url:
+        return jsonify({"status": False, "error": "URL is required"}), 400
+
+    logger.info(f"Play: {youtube_url}")
+    video_data, error = get_video_info(youtube_url)
+    
+    if error:
+        return jsonify({"status": False, "error": error}), 400
+
+    # Get the best audio URL from formats or the root
+    audio_url = video_data.get('url')
+    if not audio_url and 'formats' in video_data:
+        # Filter for audio-only formats
+        audio_formats = [f for f in video_data['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        if audio_formats:
+            # Pick the best quality audio
+            audio_url = sorted(audio_formats, key=lambda x: x.get('abr', 0) or 0, reverse=True)[0].get('url')
+
+    if not audio_url:
+        return jsonify({"status": False, "error": "Could not extract audio stream"}), 404
+
+    return jsonify({
+        "status": True,
+        "title": video_data.get('title', 'Unknown Title'),
+        "duration": video_data.get('duration', 0),
+        "author": video_data.get('uploader', 'Unknown Artist'),
+        "thumbnail": video_data.get('thumbnail', ''),
+        "audio": audio_url,
+        "id": video_data.get('id')
+    })
 
 @app.route('/download', methods=['GET'])
 def download():
@@ -85,45 +74,35 @@ def download():
     if not youtube_url:
         return jsonify({"status": False, "error": "URL is required"}), 400
 
-    logger.info(f"Processing URL for download: {youtube_url}")
+    logger.info(f"Download: {youtube_url}")
+    video_data, error = get_video_info(youtube_url)
+    
+    if error:
+        return jsonify({"status": False, "error": error}), 400
+
+    audio_url = video_data.get('url')
+    if not audio_url and 'formats' in video_data:
+        audio_formats = [f for f in video_data['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        if audio_formats:
+            audio_url = sorted(audio_formats, key=lambda x: x.get('abr', 0) or 0, reverse=True)[0].get('url')
+
+    if not audio_url:
+        return jsonify({"status": False, "error": "Could not get audio URL"}), 400
 
     try:
-        # Step 1: Get direct URL and title using -J for more reliability
-        cmd = ['yt-dlp', '-J', '--no-playlist', '-f', 'bestaudio/best', youtube_url]
-        process = subprocess.run(cmd, capture_output=True, text=True)
-        if process.returncode != 0:
-            logger.error(f"yt-dlp download error: {process.stderr}")
-            return jsonify({"status": False, "error": "Extraction failed"}), 400
-        
-        video_data = json.loads(process.stdout)
-        title = video_data.get('title', 'audio')
-        audio_url = video_data.get('url')
-
-        if not audio_url:
-            # Try -g as fallback
-            logger.info("Direct URL not in JSON, trying -g fallback")
-            url_cmd = ['yt-dlp', '-f', 'bestaudio/best', '-g', youtube_url]
-            url_process = subprocess.run(url_cmd, capture_output=True, text=True)
-            if url_process.returncode == 0:
-                audio_url = url_process.stdout.strip()
-
-        if not audio_url:
-            return jsonify({"status": False, "error": "Could not get audio URL"}), 400
-
-        # Stream the file from YouTube to the client
-        # User agents can help with some restrictions
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        req = requests.get(audio_url, stream=True, headers=headers, timeout=30)
+        # Use a longer timeout and better error handling for the request
+        req = requests.get(audio_url, stream=True, headers=headers, timeout=60)
         req.raise_for_status()
         
         def generate():
-            for chunk in req.iter_content(chunk_size=65536): # Increased chunk size
+            for chunk in req.iter_content(chunk_size=1024 * 64):
                 if chunk:
                     yield chunk
 
-        # Sanitize filename
+        title = video_data.get('title', 'audio')
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '.', '_')]).strip()
         if not safe_title:
             safe_title = "audio"
@@ -137,7 +116,7 @@ def download():
             }
         )
     except Exception as e:
-        logger.exception("Unexpected error in /download")
+        logger.exception("Download streaming error")
         return jsonify({"status": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
