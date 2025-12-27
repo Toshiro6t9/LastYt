@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { createServer } from "http";
+import "./storage"; // Ensure storage is initialized
 
 const app = express();
 const httpServer = createServer(app);

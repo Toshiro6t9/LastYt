@@ -1,21 +1,35 @@
-import { type Download, type InsertDownload, downloads } from "@shared/schema";
-import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { type Download, type InsertDownload } from "@shared/schema";
 
 export interface IStorage {
   getRecentDownloads(): Promise<Download[]>;
   addDownload(download: InsertDownload): Promise<Download>;
 }
 
-export class DatabaseStorage implements IStorage {
+export class MemStorage implements IStorage {
+  private downloads: Map<number, Download>;
+  private nextId: number;
+
+  constructor() {
+    this.downloads = new Map();
+    this.nextId = 1;
+  }
+
   async getRecentDownloads(): Promise<Download[]> {
-    return await db.select().from(downloads).orderBy(desc(downloads.playedAt)).limit(10);
+    return Array.from(this.downloads.values())
+      .sort((a, b) => (b.playedAt?.getTime() || 0) - (a.playedAt?.getTime() || 0))
+      .slice(0, 10);
   }
 
   async addDownload(insertDownload: InsertDownload): Promise<Download> {
-    const [download] = await db.insert(downloads).values(insertDownload).returning();
+    const id = this.nextId++;
+    const download: Download = { 
+      ...insertDownload, 
+      id, 
+      playedAt: insertDownload.playedAt || new Date() 
+    };
+    this.downloads.set(id, download);
     return download;
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new MemStorage();
