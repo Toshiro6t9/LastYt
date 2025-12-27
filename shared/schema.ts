@@ -1,8 +1,9 @@
-import { pgTable, text, serial, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Download history table
+// We don't strictly need a DB for the downloader, but we'll define a history table
+// to show recently played/downloaded tracks (optional feature)
 export const downloads = pgTable("downloads", {
   id: serial("id").primaryKey(),
   url: text("url").notNull(),
@@ -23,14 +24,14 @@ export const insertDownloadSchema = createInsertSchema(downloads).pick({
 export type Download = typeof downloads.$inferSelect;
 export type InsertDownload = z.infer<typeof insertDownloadSchema>;
 
-// Track info schema for the search results
+// API Response type matching the user requirement
 export const trackInfoSchema = z.object({
-  id: z.string(),
+  status: z.boolean(),
   title: z.string(),
-  duration: z.string().optional(),
+  duration: z.number().nullable().optional(),
   author: z.string(),
   thumbnail: z.string(),
-  url: z.string(),
+  audio: z.string(),
 });
 
 export type TrackInfo = z.infer<typeof trackInfoSchema>;

@@ -1,4 +1,4 @@
-# Toshiro Yt Music Downloader
+# YouTube Audio Streaming APIs
 
 I have implemented two standalone APIs (Python/Flask and NodeJS/Express) that use `yt-dlp` to extract direct audio URLs and stream them directly to the client.
 
