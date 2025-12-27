@@ -22,6 +22,7 @@ def get_video_info(url):
             '-J',
             '--no-playlist',
             '--flat-playlist',
+            '--socket-timeout', '30',
             '-f', 'bestaudio/best',
             url
         ]
