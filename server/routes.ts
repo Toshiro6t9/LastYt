@@ -24,15 +24,18 @@ export async function registerRoutes(
     console.error('Failed to start Python backend:', err);
   });
   
-  // Proxy the /play endpoint to the Python Flask server
-  app.get('/play', createProxyMiddleware({
+  // Proxy /play and /download to Python
+  const proxy = createProxyMiddleware({
     target: 'http://127.0.0.1:5001',
     changeOrigin: true,
     onError: (err, req, res) => {
       console.error("Proxy error:", err);
       res.status(502).json({ status: false, error: "Backend service unavailable" });
     }
-  }));
+  });
+
+  app.get('/play', proxy);
+  app.get('/download', proxy);
 
   // Optional: History endpoint if we want to show recent plays
   app.get('/api/history', async (req, res) => {
