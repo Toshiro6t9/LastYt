@@ -10,14 +10,9 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   // Start the Python Flask server for the downloader logic
-  // We run it on port 5001 to avoid conflict with the main Node server on 5000
   console.log("Starting Python backend...");
-  
-  // Install flask first if needed (though we expect it to be installed via requirements or manual step)
-  // For robustness in this environment, we'll assume 'pip install flask flask-cors' is run or available.
-  // We'll try to run the python script.
-  const pythonProcess = spawn('python3', ['server/app.py'], {
-    stdio: 'inherit' // Pipe output to parent console for debugging
+  const pythonProcess = spawn('python3', ['python_api/app.py'], {
+    stdio: 'inherit'
   });
 
   pythonProcess.on('error', (err) => {

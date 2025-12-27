@@ -146,7 +146,10 @@ def download():
         return {"error": "An internal error occurred during download"}, 500
 
 if __name__ == '__main__':
-    # Use PORT environment variable if available (standard for Render/Heroku/etc)
+    # Force port 5001 for local development to avoid conflict with Node (5000)
+    # Only use PORT env var if it's not 5000, or if we are in production
     port = int(os.environ.get('PORT', 5001))
+    if port == 5000:
+        port = 5001
     print(f"Python Audio API is starting on http://0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port, threaded=True)
