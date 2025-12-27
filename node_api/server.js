@@ -79,7 +79,7 @@ app.get('/play', async (req, res) => {
       }
     });
 
-    const safeTitle = title.replace(/[^\w\-_\. ]/g, '_') || 'audio';
+    const safeTitle = title.replace(/[^\x00-\x7F]/g, '_').replace(/[^\w\-_\. ]/g, '_') || 'audio';
     res.setHeader('Content-Type', response.headers['content-type'] || 'audio/mpeg');
     res.setHeader('Content-Disposition', `inline; filename="${safeTitle}.mp3"`);
     if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
@@ -110,7 +110,7 @@ app.get('/download', async (req, res) => {
       }
     });
 
-    const safeTitle = title.replace(/[^\w\-_\. ]/g, '_') || 'audio';
+    const safeTitle = title.replace(/[^\x00-\x7F]/g, '_').replace(/[^\w\-_\. ]/g, '_') || 'audio';
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp3"`);
     if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);

@@ -94,8 +94,9 @@ def play():
                 if chunk:
                     yield chunk
 
-        # Clean title for filename
-        safe_title = re.sub(r'[^\w\-_\. ]', '_', title) if title else "audio"
+        # Clean title for filename (ASCII only for headers)
+        safe_title = re.sub(r'[^\x00-\x7F]+', '_', title) if title else "audio"
+        safe_title = re.sub(r'[^\w\-_\. ]', '_', safe_title)
         
         headers = {
             'Content-Type': req.headers.get('Content-Type', 'audio/mpeg'),
@@ -145,7 +146,8 @@ def download():
                     yield chunk
 
         # Extract filename or use default
-        safe_title = re.sub(r'[^\w\-_\. ]', '_', title) if title else "audio"
+        safe_title = re.sub(r'[^\x00-\x7F]+', '_', title) if title else "audio"
+        safe_title = re.sub(r'[^\w\-_\. ]', '_', safe_title)
         filename = f"{safe_title}.mp3"
         
         headers = {
