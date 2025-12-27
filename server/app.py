@@ -22,7 +22,7 @@ def get_video_info(url):
             '-J',
             '--no-playlist',
             '--flat-playlist',
-            '--socket-timeout', '30',
+            '--socket-timeout', '60',
             '-f', 'bestaudio/best',
             url
         ]
@@ -94,8 +94,8 @@ def download():
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-        # Use a longer timeout and better error handling for the request
-        req = requests.get(audio_url, stream=True, headers=headers, timeout=60)
+        # Increase timeout for Render cold starts/heavy downloads
+        req = requests.get(audio_url, stream=True, headers=headers, timeout=120)
         req.raise_for_status()
         
         def generate():
