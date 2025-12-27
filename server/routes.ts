@@ -1,47 +1,122 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { createProxyMiddleware } from "http-proxy-middleware";
 import { spawn } from "child_process";
-import { storage } from "./storage";
+import axios from "axios";
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
+/**
+ * Uses yt-dlp to extract the direct audio URL.
+ */
+async function getAudioUrl(youtubeUrl: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('yt-dlp', [
+      '--no-check-certificate',
+      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '-f', 'bestaudio/best',
+      '--get-url',
+      '--no-warnings',
+      youtubeUrl
+    ]);
 
-  // Start the Python Flask server for the downloader logic
-  // We run it on port 5001 to avoid conflict with the main Node server on 5000
-  console.log("Starting Python backend...");
-  
-  // Install flask first if needed (though we expect it to be installed via requirements or manual step)
-  // For robustness in this environment, we'll assume 'pip install flask flask-cors' is run or available.
-  // We'll try to run the python script.
-  const pythonProcess = spawn('python3', ['server/app.py'], {
-    stdio: 'inherit' // Pipe output to parent console for debugging
+    let output = '';
+    let errorOutput = '';
+
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('URL extraction timed out'));
+    }, 30000);
+
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0 && output.trim()) {
+        resolve(output.trim());
+      } else {
+        reject(new Error(`yt-dlp failed (code ${code}): ${errorOutput.trim() || 'Unknown error'}`));
+      }
+    });
   });
+}
 
-  pythonProcess.on('error', (err) => {
-    console.error('Failed to start Python backend:', err);
-  });
-  
-  // Proxy /play and /download to Python
-  const proxy = createProxyMiddleware({
-    target: 'http://127.0.0.1:5001',
-    changeOrigin: true,
-    onError: (err, req, res) => {
-      console.error("Proxy error:", err);
-      res.status(502).json({ status: false, error: "Backend service unavailable" });
+export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  // Streaming endpoint
+  app.get('/api/audio/play', async (req, res) => {
+    const videoUrl = req.query.url as string;
+    if (!videoUrl) return res.status(400).json({ error: 'Missing URL parameter' });
+
+    try {
+      const directUrl = await getAudioUrl(videoUrl);
+      const response = await axios({
+        method: 'get',
+        url: directUrl,
+        responseType: 'stream',
+        timeout: 20000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Connection': 'keep-alive'
+        }
+      });
+
+      res.setHeader('Content-Type', response.headers['content-type'] || 'audio/mpeg');
+      if (response.headers['content-length']) {
+        res.setHeader('Content-Length', response.headers['content-length']);
+      }
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-cache');
+      
+      response.data.pipe(res);
+
+      req.on('close', () => {
+        response.data.destroy();
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
-  app.get('/play', proxy);
-  app.get('/download', proxy);
+  // Download endpoint
+  app.get('/api/audio/download', async (req, res) => {
+    const videoUrl = req.query.url as string;
+    if (!videoUrl) return res.status(400).json({ error: 'Missing URL parameter' });
 
-  // Optional: History endpoint if we want to show recent plays
-  app.get('/api/history', async (req, res) => {
-    const history = await storage.getRecentDownloads();
-    res.json(history);
+    try {
+      const directUrl = await getAudioUrl(videoUrl);
+      const response = await axios({
+        method: 'get',
+        url: directUrl,
+        responseType: 'stream',
+        timeout: 20000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Connection': 'keep-alive'
+        }
+      });
+
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Disposition', 'attachment; filename="audio.mp3"');
+      if (response.headers['content-length']) {
+        res.setHeader('Content-Length', response.headers['content-length']);
+      }
+      res.setHeader('Cache-Control', 'no-cache');
+      
+      response.data.pipe(res);
+
+      req.on('close', () => {
+        response.data.destroy();
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
+  const portPlaceholder = 5000; // not used since index.ts creates the server
   return httpServer;
 }
