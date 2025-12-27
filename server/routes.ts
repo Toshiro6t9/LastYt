@@ -28,10 +28,13 @@ export async function registerRoutes(
   const proxy = createProxyMiddleware({
     target: 'http://127.0.0.1:5001',
     changeOrigin: true,
+    proxyTimeout: 120000, // Timeout for the proxy itself
     on: {
       error: (err: any, _req: any, res: any) => {
         console.error("Proxy error:", err);
-        res.status(502).json({ status: false, error: "Backend service unavailable" });
+        if (!res.headersSent) {
+          res.status(502).json({ status: false, error: "Backend service unavailable or timed out" });
+        }
       }
     }
   });
