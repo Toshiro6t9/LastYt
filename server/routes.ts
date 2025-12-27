@@ -10,8 +10,9 @@ export async function registerRoutes(
 
   const get_video_info = (url: string): Promise<any> => {
     return new Promise((resolve, reject) => {
+      const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
       const cmd = [
-        'yt-dlp',
+        ytDlpPath,
         '-J',
         '--no-playlist',
         '--flat-playlist',
@@ -19,7 +20,7 @@ export async function registerRoutes(
         '-f', 'bestaudio/best',
         url
       ];
-      const process_info = spawn('yt-dlp', cmd.slice(1));
+      const process_info = spawn(ytDlpPath, cmd.slice(1));
       let stdout = '';
       let stderr = '';
 
@@ -98,7 +99,8 @@ export async function registerRoutes(
       res.setHeader('Content-Disposition', `attachment; filename="${asciiTitle}.mp3"`);
       res.setHeader('Content-Type', 'audio/mpeg');
 
-      const ytProcess = spawn('yt-dlp', [
+      const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
+      const ytProcess = spawn(ytDlpPath, [
         '-o', '-',
         '-f', 'bestaudio/best',
         '--socket-timeout', '60',

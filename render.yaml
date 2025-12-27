@@ -3,10 +3,15 @@ services:
     name: youtube-audio-api
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: |
+      npm install
+      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ./yt-dlp
+      chmod a+rx ./yt-dlp
     startCommand: npx tsx server/index.ts
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 5000
+      - key: PATH
+        value: /opt/render/project/src:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
