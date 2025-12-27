@@ -17,30 +17,39 @@ def get_audio_url(youtube_url):
     """
     try:
         # Command to get the best audio URL
+        # --no-playlist ensures we only get the single video
+        # --get-title and --get-duration added for more info
         cmd = [
             'yt-dlp',
             '--no-check-certificate',
+            '--no-playlist',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-f', 'bestaudio/best',
             '--get-url',
+            '--get-title',
             '--no-warnings',
             youtube_url
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-        url = result.stdout.strip()
-        if not url:
-            logger.error("yt-dlp returned empty output")
-            return None
-        return url
+        output_lines = result.stdout.strip().split('\n')
+        
+        if len(output_lines) < 2:
+            logger.error("yt-dlp returned insufficient output")
+            return None, None
+            
+        title = output_lines[0]
+        url = output_lines[1]
+        
+        return url, title
     except subprocess.TimeoutExpired:
         logger.error("yt-dlp extraction timed out")
-        return None
+        return None, None
     except subprocess.CalledProcessError as e:
         logger.error(f"yt-dlp error: {e.stderr}")
-        return None
+        return None, None
     except Exception as e:
         logger.error(f"Unexpected error in get_audio_url: {str(e)}")
-        return None
+        return None, None
 
 @app.route('/')
 def home():
@@ -66,7 +75,7 @@ def play():
         return {"error": "Invalid YouTube URL format"}, 400
 
     logger.info(f"Extracting audio URL for: {video_url}")
-    direct_url = get_audio_url(video_url)
+    direct_url, title = get_audio_url(video_url)
     
     if not direct_url:
         return {"error": "Failed to extract direct audio URL."}, 500
@@ -85,14 +94,19 @@ def play():
                 if chunk:
                     yield chunk
 
+        # Clean title for filename
+        safe_title = re.sub(r'[^\w\-_\. ]', '_', title) if title else "audio"
+        
         headers = {
             'Content-Type': req.headers.get('Content-Type', 'audio/mpeg'),
             'Content-Length': req.headers.get('Content-Length'),
+            'Content-Disposition': f'inline; filename="{safe_title}.mp3"',
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'no-cache',
             'X-Content-Type-Options': 'nosniff'
         }
 
+        logger.info(f"Streaming started for: {title}")
         return Response(stream_with_context(generate()), headers=headers)
 
     except Exception as e:
@@ -112,7 +126,7 @@ def download():
     if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', video_url):
         return {"error": "Invalid YouTube URL format"}, 400
 
-    direct_url = get_audio_url(video_url)
+    direct_url, title = get_audio_url(video_url)
     if not direct_url:
         return {"error": "Failed to extract direct audio URL."}, 500
 
@@ -131,7 +145,8 @@ def download():
                     yield chunk
 
         # Extract filename or use default
-        filename = "audio.mp3"
+        safe_title = re.sub(r'[^\w\-_\. ]', '_', title) if title else "audio"
+        filename = f"{safe_title}.mp3"
         
         headers = {
             'Content-Type': 'audio/mpeg',
