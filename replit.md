@@ -9,8 +9,8 @@ Focused Python/Flask implementation for extracting and streaming YouTube audio d
 - **Production Ready**: Includes URL validation, 30s timeouts, and 403-bypass headers.
 
 ### Endpoints
-- **Stream/Play**: `http://localhost:5001/play?url=<YOUTUBE_URL>`
-- **Direct Download**: `http://localhost:5001/download?url=<YOUTUBE_URL>`
+- **Stream/Play**: `http://localhost:10527/play?url=<YOUTUBE_URL>`
+- **Direct Download**: `http://localhost:10527/download?url=<YOUTUBE_URL>`
 
 ### Usage
 Run the server:

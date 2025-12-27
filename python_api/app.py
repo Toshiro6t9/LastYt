@@ -129,5 +129,5 @@ def download():
         return {"error": str(e)}, 500
 
 if __name__ == '__main__':
-    # Runs on port 5001 to avoid conflicts
-    app.run(host='0.0.0.0', port=5001, threaded=True)
+    # Updated to port 10527
+    app.run(host='0.0.0.0', port=10527, threaded=True)
