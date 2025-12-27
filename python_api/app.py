@@ -89,7 +89,8 @@ def play():
             'Content-Type': req.headers.get('Content-Type', 'audio/mpeg'),
             'Content-Length': req.headers.get('Content-Length'),
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'X-Content-Type-Options': 'nosniff'
         }
 
         return Response(stream_with_context(generate()), headers=headers)

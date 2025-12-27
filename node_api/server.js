@@ -76,6 +76,7 @@ app.get('/play', async (req, res) => {
     res.setHeader('Content-Type', response.headers['content-type'] || 'audio/mpeg');
     if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     response.data.pipe(res);
   } catch (error) {
     res.status(500).json({ error: error.message });
