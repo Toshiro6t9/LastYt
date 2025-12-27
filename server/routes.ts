@@ -28,14 +28,29 @@ export async function registerRoutes(
   const proxy = createProxyMiddleware({
     target: 'http://127.0.0.1:5001',
     changeOrigin: true,
-    onError: (err, req, res) => {
-      console.error("Proxy error:", err);
-      res.status(502).json({ status: false, error: "Backend service unavailable" });
+    on: {
+      error: (err: any, _req: any, res: any) => {
+        console.error("Proxy error:", err);
+        res.status(502).json({ status: false, error: "Backend service unavailable" });
+      }
     }
   });
 
   app.get('/play', proxy);
   app.get('/download', proxy);
+
+  // Health check/Root endpoint
+  app.get('/', (req, res) => {
+    res.json({
+      status: "online",
+      message: "YouTube Audio API is running",
+      endpoints: {
+        play: "/play?url=<YOUTUBE_URL>",
+        download: "/download?url=<YOUTUBE_URL>",
+        history: "/api/history"
+      }
+    });
+  });
 
   // Optional: History endpoint if we want to show recent plays
   app.get('/api/history', async (req, res) => {
