@@ -63,9 +63,13 @@ def play():
         return {"error": "Failed to extract direct audio URL. The video might be restricted or unavailable."}, 500
 
     try:
-        # Stream the audio from the direct URL
-        # stream=True ensures we don't load the entire file into memory
-        req = requests.get(direct_url, stream=True, timeout=15)
+        # Use a common browser User-Agent to bypass some YouTube/CDN restrictions
+        headers_to_use = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        }
+        req = requests.get(direct_url, stream=True, timeout=15, headers=headers_to_use)
         req.raise_for_status()
         
         def generate():
