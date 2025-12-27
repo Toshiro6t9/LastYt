@@ -107,10 +107,13 @@ def download():
         if not safe_title:
             safe_title = "audio"
         
+        # ASCII-only filename for Content-Disposition to avoid encoding errors
+        ascii_title = safe_title.encode('ascii', 'ignore').decode('ascii') or "audio"
+
         return Response(
             stream_with_context(generate()),
             headers={
-                "Content-Disposition": f"attachment; filename=\"{safe_title}.mp3\"",
+                "Content-Disposition": f"attachment; filename=\"{ascii_title}.mp3\"",
                 "Content-Type": "audio/mpeg",
                 "Content-Length": req.headers.get('Content-Length')
             }
