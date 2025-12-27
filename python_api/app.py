@@ -3,6 +3,7 @@ import subprocess
 import requests
 import re
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,14 +17,13 @@ def get_audio_url(youtube_url):
     """
     try:
         # Command to get the best audio URL
-        # --get-url returns only the URL
-        # -f bestaudio ensures we get the audio stream
         cmd = [
             'yt-dlp',
+            '--no-check-certificate',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-f', 'bestaudio/best',
             '--get-url',
             '--no-warnings',
-            '--extract-audio',
             youtube_url
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
@@ -50,9 +50,8 @@ def play():
     """
     video_url = request.args.get('url')
     if not video_url:
-        return {"error": "Missing 'url' parameter. Example: /play?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"}, 400
+        return {"error": "Missing 'url' parameter."}, 400
 
-    # Basic YouTube URL validation
     if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', video_url):
         return {"error": "Invalid YouTube URL format"}, 400
 
@@ -60,12 +59,11 @@ def play():
     direct_url = get_audio_url(video_url)
     
     if not direct_url:
-        return {"error": "Failed to extract direct audio URL. The video might be restricted or unavailable."}, 500
+        return {"error": "Failed to extract direct audio URL."}, 500
 
     try:
-        # Use a common browser User-Agent to bypass some YouTube/CDN restrictions
         headers_to_use = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Connection': 'keep-alive'
         }
@@ -73,12 +71,10 @@ def play():
         req.raise_for_status()
         
         def generate():
-            # Chunked reading for memory safety (4KB chunks)
             for chunk in req.iter_content(chunk_size=4096):
                 if chunk:
                     yield chunk
 
-        # Proxy essential headers for better compatibility with players
         headers = {
             'Content-Type': req.headers.get('Content-Type', 'audio/mpeg'),
             'Content-Length': req.headers.get('Content-Length'),
@@ -86,17 +82,58 @@ def play():
             'Cache-Control': 'no-cache'
         }
 
-        logger.info(f"Streaming started for: {video_url}")
         return Response(stream_with_context(generate()), headers=headers)
 
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error while streaming: {str(e)}")
-        return {"error": "Failed to connect to audio source"}, 502
     except Exception as e:
         logger.error(f"Streaming error: {str(e)}")
         return {"error": "An internal error occurred during streaming"}, 500
 
+@app.route('/download')
+def download():
+    """
+    Endpoint: /download?url=YOUTUBE_URL
+    Forces a download of the audio file.
+    """
+    video_url = request.args.get('url')
+    if not video_url:
+        return {"error": "Missing 'url' parameter."}, 400
+
+    if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', video_url):
+        return {"error": "Invalid YouTube URL format"}, 400
+
+    direct_url = get_audio_url(video_url)
+    if not direct_url:
+        return {"error": "Failed to extract direct audio URL."}, 500
+
+    try:
+        headers_to_use = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        }
+        req = requests.get(direct_url, stream=True, timeout=15, headers=headers_to_use)
+        req.raise_for_status()
+
+        def generate():
+            for chunk in req.iter_content(chunk_size=4096):
+                if chunk:
+                    yield chunk
+
+        # Extract filename or use default
+        filename = "audio.mp3"
+        
+        headers = {
+            'Content-Type': 'audio/mpeg',
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': req.headers.get('Content-Length'),
+            'Cache-Control': 'no-cache'
+        }
+
+        return Response(stream_with_context(generate()), headers=headers)
+
+    except Exception as e:
+        logger.error(f"Download error: {str(e)}")
+        return {"error": "An internal error occurred during download"}, 500
+
 if __name__ == '__main__':
-    # Running on port 5001 to avoid conflict with default Replit frontend (5000)
-    print("Python Audio API is starting on http://0.0.0.0:5001")
     app.run(host='0.0.0.0', port=5001, threaded=True)

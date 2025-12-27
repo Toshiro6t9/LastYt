@@ -9,8 +9,12 @@ I have implemented two standalone APIs (Python/Flask and NodeJS/Express) that us
 - **Production Ready**: Includes basic URL validation, timeouts, and error handling.
 
 ### How to use
-- **Python API**: Run `python python_api/app.py`. Endpoint: `http://localhost:5001/play?url=<YOUTUBE_URL>`
-- **NodeJS API**: Run `node node_api/server.js`. Endpoint: `http://localhost:5002/play?url=<YOUTUBE_URL>`
+- **Python API**:
+  - Play: `http://localhost:5001/play?url=<YOUTUBE_URL>`
+  - Download: `http://localhost:5001/download?url=<YOUTUBE_URL>`
+- **NodeJS API**:
+  - Play: `http://localhost:5002/play?url=<YOUTUBE_URL>`
+  - Download: `http://localhost:5002/download?url=<YOUTUBE_URL>`
 
 ### Implementation details
 1. **Extraction**: `yt-dlp -f bestaudio --get-url` is used to find the direct source.
