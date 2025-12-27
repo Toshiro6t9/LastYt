@@ -16,7 +16,7 @@ export class MemStorage implements IStorage {
 
   async getRecentDownloads(): Promise<Download[]> {
     return Array.from(this.downloads.values())
-      .sort((a, b) => (b.playedAt || 0) - (a.playedAt || 0))
+      .sort((a, b) => (Number(b.playedAt) || 0) - (Number(a.playedAt) || 0))
       .slice(0, 10);
   }
 

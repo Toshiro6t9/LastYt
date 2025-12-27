@@ -19,14 +19,19 @@ export async function registerRoutes(
         '-f', 'bestaudio/best',
         url
       ];
-      const process = spawn('yt-dlp', cmd.slice(1));
+      const process_info = spawn('yt-dlp', cmd.slice(1));
       let stdout = '';
       let stderr = '';
 
-      process.stdout.on('data', (data) => stdout += data);
-      process.stderr.on('data', (data) => stderr += data);
+      process_info.on('error', (err) => {
+        console.error('yt-dlp info spawn error:', err);
+        reject(err);
+      });
 
-      process.on('close', (code) => {
+      process_info.stdout.on('data', (data) => stdout += data);
+      process_info.stderr.on('data', (data) => stderr += data);
+
+      process_info.on('close', (code) => {
         if (code !== 0) {
           return reject(new Error(`yt-dlp error: ${stderr}`));
         }
