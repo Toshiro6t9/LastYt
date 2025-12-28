@@ -112,6 +112,7 @@ export async function registerRoutes(
       res.setHeader('Transfer-Encoding', 'chunked');
 
       const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
+      console.log("Audio downloading..");
       const ytProcess = spawn(ytDlpPath, [
         '-o', '-',
         '-f', 'bestaudio/best',
@@ -131,7 +132,8 @@ export async function registerRoutes(
       });
 
       ytProcess.stdout.on('end', () => {
-        console.log(`[Download] stdout ended`);
+        console.log("Seucefully download..");
+        console.log("Sent to api caller");
         if (!res.writableEnded) {
           res.end();
         }
