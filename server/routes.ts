@@ -16,15 +16,23 @@ export async function registerRoutes(
         '-J',
         '--no-playlist',
         '--flat-playlist',
-        '--socket-timeout', '60',
+        '--socket-timeout', '120',
         '-f', 'bestaudio/best',
+        '--no-warnings',
+        '--prefer-free-formats',
         url
       ];
       const process_info = spawn(ytDlpPath, cmd.slice(1));
       let stdout = '';
       let stderr = '';
 
+      const timeout = setTimeout(() => {
+        process_info.kill();
+        reject(new Error('Metadata extraction timed out'));
+      }, 120000);
+
       process_info.on('error', (err) => {
+        clearTimeout(timeout);
         console.error('yt-dlp info spawn error:', err);
         reject(err);
       });
@@ -33,6 +41,7 @@ export async function registerRoutes(
       process_info.stderr.on('data', (data) => stderr += data);
 
       process_info.on('close', (code) => {
+        clearTimeout(timeout);
         if (code !== 0) {
           return reject(new Error(`yt-dlp error: ${stderr}`));
         }
@@ -108,7 +117,8 @@ export async function registerRoutes(
         '-f', 'bestaudio/best',
         '--no-part',
         '--buffer-size', '16K',
-        '--socket-timeout', '60',
+        '--socket-timeout', '120',
+        '--no-warnings',
         url
       ]);
 
