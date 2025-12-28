@@ -132,24 +132,24 @@ export async function registerRoutes(
         '--buffer-size', '16K',
         '--socket-timeout', '120',
         '--no-warnings',
+        '--prefer-free-formats',
         '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
         url
       ];
 
-      const ytProcess = spawn('yt-dlp', ytArgs);
+      // Use local binary directly to ensure it works
+      const ytProcess = spawn('./yt-dlp', ytArgs);
 
       ytProcess.on('error', (err) => {
-        if ((err as any).code === 'ENOENT') {
-          const localProc = spawn('./yt-dlp', ytArgs);
-          localProc.stdout.on('data', (chunk) => !res.writableEnded && res.write(chunk));
-          localProc.stdout.on('end', () => {
-             console.log("Seucefully download..");
-             console.log("Sent to api caller");
-             !res.writableEnded && res.end();
-          });
-          return;
-        }
+        console.error('yt-dlp download spawn error:', err);
         if (!res.headersSent) res.status(500).json({ status: false, error: "Failed to start downloader" });
+      });
+
+      ytProcess.stderr.on('data', (data) => {
+        const msg = data.toString();
+        if (msg.includes('ERROR:')) {
+           console.error('yt-dlp stderr error:', msg);
+        }
       });
 
       ytProcess.stdout.on('data', (chunk) => {
