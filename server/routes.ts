@@ -125,49 +125,60 @@ export async function registerRoutes(
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Transfer-Encoding', 'chunked');
 
+      // Add flags to force stream output and disable any local caching
       const ytArgs = [
-        '-o', '-',
-        '-f', 'bestaudio/best',
+        '--no-cache-dir',
+        '--no-mtime',
         '--no-part',
         '--buffer-size', '16K',
-        '--socket-timeout', '120',
+        '-f', 'bestaudio/best',
+        '-o', '-',
+        '--socket-timeout', '60',
+        '--no-playlist',
         '--no-warnings',
         '--prefer-free-formats',
         '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
         url
       ];
 
-      // Use local binary directly to ensure it works
+      console.log(`Starting yt-dlp process for: ${url}`);
       const ytProcess = spawn('./yt-dlp', ytArgs);
-
-      ytProcess.on('error', (err) => {
-        console.error('yt-dlp download spawn error:', err);
-        if (!res.headersSent) res.status(500).json({ status: false, error: "Failed to start downloader" });
-      });
-
-      ytProcess.stderr.on('data', (data) => {
-        const msg = data.toString();
-        if (msg.includes('ERROR:')) {
-           console.error('yt-dlp stderr error:', msg);
-        }
-      });
+      let bytesSent = 0;
 
       ytProcess.stdout.on('data', (chunk) => {
         if (!res.writableEnded) {
           res.write(chunk);
+          bytesSent += chunk.length;
         }
       });
 
-      ytProcess.stdout.on('end', () => {
-        console.log("Seucefully download..");
-        console.log("Sent to api caller");
-        if (!res.writableEnded) {
-          res.end();
+      ytProcess.stderr.on('data', (data) => {
+        const msg = data.toString();
+        if (msg.toLowerCase().includes('error')) {
+          console.error(`yt-dlp download error: ${msg}`);
         }
+      });
+
+      ytProcess.on('close', (code) => {
+        console.log(`yt-dlp process closed with code ${code}. Total bytes sent: ${bytesSent}`);
+        if (code === 0 && bytesSent > 0) {
+          console.log("Seucefully download..");
+          console.log("Sent to api caller");
+        } else if (!res.writableEnded) {
+          console.error('Download failed or no data produced');
+        }
+        if (!res.writableEnded) res.end();
+      });
+
+      ytProcess.on('error', (err) => {
+        console.error('yt-dlp process error:', err);
+        if (!res.writableEnded) res.end();
       });
 
       res.on('close', () => {
-        if (ytProcess) ytProcess.kill();
+        if (ytProcess && !ytProcess.killed) {
+          ytProcess.kill('SIGTERM');
+        }
       });
     } catch (error: any) {
       res.status(500).json({ status: false, error: error.message });
