@@ -10,7 +10,8 @@ export async function registerRoutes(
 
   const get_video_info = (url: string): Promise<any> => {
     return new Promise((resolve, reject) => {
-      const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
+      // Prioritize system-wide yt-dlp, fallback to local path
+      const ytDlpPath = 'yt-dlp';
       const cmd = [
         ytDlpPath,
         '-J',
@@ -22,6 +23,7 @@ export async function registerRoutes(
         '--prefer-free-formats',
         url
       ];
+      
       const process_info = spawn(ytDlpPath, cmd.slice(1));
       let stdout = '';
       let stderr = '';
@@ -33,6 +35,29 @@ export async function registerRoutes(
 
       process_info.on('error', (err) => {
         clearTimeout(timeout);
+        // If system command fails, try local path
+        if ((err as any).code === 'ENOENT') {
+          const localPath = './yt-dlp';
+          const localProcess = spawn(localPath, cmd.slice(1));
+          
+          localProcess.on('error', (localErr) => {
+            console.error('yt-dlp local spawn error:', localErr);
+            reject(localErr);
+          });
+          
+          let localStdout = '';
+          let localStderr = '';
+          
+          localProcess.stdout.on('data', (data) => localStdout += data);
+          localProcess.stderr.on('data', (data) => localStderr += data);
+          
+          localProcess.on('close', (code) => {
+            clearTimeout(timeout);
+            if (code !== 0) return reject(new Error(`yt-dlp local error: ${localStderr}`));
+            try { resolve(JSON.parse(localStdout)); } catch (e) { reject(e); }
+          });
+          return;
+        }
         console.error('yt-dlp info spawn error:', err);
         reject(err);
       });
@@ -111,9 +136,28 @@ export async function registerRoutes(
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Transfer-Encoding', 'chunked');
 
-      const ytDlpPath = process.env.NODE_ENV === 'production' ? './yt-dlp' : 'yt-dlp';
       console.log("Audio downloading..");
-      const ytProcess = spawn(ytDlpPath, [
+      
+      const spawnWithFallback = (path: string, args: string[]) => {
+        const proc = spawn(path, args);
+        proc.on('error', (err) => {
+          if ((err as any).code === 'ENOENT' && path === 'yt-dlp') {
+            console.log("System yt-dlp not found, trying local ./yt-dlp");
+            const localProc = spawn('./yt-dlp', args);
+            // Setup local listeners here if needed, but for simplicity we rely on the primary piping
+            localProc.stdout.on('data', (chunk) => !res.writableEnded && res.write(chunk));
+            localProc.stdout.on('end', () => {
+              console.log("Seucefully download..");
+              console.log("Sent to api caller");
+              !res.writableEnded && res.end();
+            });
+            localProc.on('error', (e) => console.error("Local yt-dlp failed:", e));
+          }
+        });
+        return proc;
+      };
+
+      const ytArgs = [
         '-o', '-',
         '-f', 'bestaudio/best',
         '--no-part',
@@ -121,9 +165,24 @@ export async function registerRoutes(
         '--socket-timeout', '120',
         '--no-warnings',
         url
-      ]);
+      ];
 
-      console.log(`[Download] yt-dlp process spawned (PID: ${ytProcess.pid})`);
+      const ytProcess = spawn('yt-dlp', ytArgs);
+
+      ytProcess.on('error', (err) => {
+        if ((err as any).code === 'ENOENT') {
+          const localProc = spawn('./yt-dlp', ytArgs);
+          localProc.stdout.on('data', (chunk) => !res.writableEnded && res.write(chunk));
+          localProc.stdout.on('end', () => {
+             console.log("Seucefully download..");
+             console.log("Sent to api caller");
+             !res.writableEnded && res.end();
+          });
+          return;
+        }
+        console.error('[Download] yt-dlp spawn error:', err);
+        if (!res.headersSent) res.status(500).json({ status: false, error: "Failed to start downloader" });
+      });
 
       ytProcess.stdout.on('data', (chunk) => {
         if (!res.writableEnded) {
