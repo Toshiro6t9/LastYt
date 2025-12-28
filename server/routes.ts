@@ -1,109 +1,29 @@
 import type { Express } from "express";
 import type { Server } from "http";
-import { spawn } from "child_process";
 import { storage } from "./storage";
+import ytdl from "@distube/ytdl-core";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
-  const get_video_info = (url: string): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      // Prioritize system-wide yt-dlp, fallback to local path
-      const ytDlpPath = 'yt-dlp';
-      const cmd = [
-        ytDlpPath,
-        '-J',
-        '--no-playlist',
-        '--flat-playlist',
-        '--socket-timeout', '120',
-        '-f', 'bestaudio/best',
-        '--no-warnings',
-        '--prefer-free-formats',
-        url
-      ];
-      
-      const process_info = spawn(ytDlpPath, cmd.slice(1));
-      let stdout = '';
-      let stderr = '';
-
-      const timeout = setTimeout(() => {
-        process_info.kill();
-        reject(new Error('Metadata extraction timed out'));
-      }, 120000);
-
-      process_info.on('error', (err) => {
-        clearTimeout(timeout);
-        // If system command fails, try local path
-        if ((err as any).code === 'ENOENT') {
-          const localPath = './yt-dlp';
-          const localProcess = spawn(localPath, cmd.slice(1));
-          
-          localProcess.on('error', (localErr) => {
-            console.error('yt-dlp local spawn error:', localErr);
-            reject(localErr);
-          });
-          
-          let localStdout = '';
-          let localStderr = '';
-          
-          localProcess.stdout.on('data', (data) => localStdout += data);
-          localProcess.stderr.on('data', (data) => localStderr += data);
-          
-          localProcess.on('close', (code) => {
-            clearTimeout(timeout);
-            if (code !== 0) return reject(new Error(`yt-dlp local error: ${localStderr}`));
-            try { resolve(JSON.parse(localStdout)); } catch (e) { reject(e); }
-          });
-          return;
-        }
-        console.error('yt-dlp info spawn error:', err);
-        reject(err);
-      });
-
-      process_info.stdout.on('data', (data) => stdout += data);
-      process_info.stderr.on('data', (data) => stderr += data);
-
-      process_info.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code !== 0) {
-          return reject(new Error(`yt-dlp error: ${stderr}`));
-        }
-        try {
-          resolve(JSON.parse(stdout));
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-  };
-
   app.get('/play', async (req, res) => {
     const url = req.query.url as string;
     if (!url) return res.status(400).json({ status: false, error: "URL is required" });
 
     try {
-      const videoData = await get_video_info(url);
-      let audioUrl = videoData.url;
+      const info = await ytdl.getInfo(url);
+      const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
       
-      if (!audioUrl && videoData.formats) {
-        const audioFormats = videoData.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
-        if (audioFormats.length > 0) {
-          audioUrl = audioFormats.sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0))[0].url;
-        }
-      }
-
-      if (!audioUrl) throw new Error("Could not extract audio stream");
-
       res.json({
         status: true,
-        title: videoData.title || 'Unknown Title',
-        duration: videoData.duration || 0,
-        author: videoData.uploader || 'Unknown Artist',
-        thumbnail: videoData.thumbnail || '',
-        audio: audioUrl,
-        id: videoData.id
+        title: info.videoDetails.title,
+        duration: parseInt(info.videoDetails.lengthSeconds),
+        author: info.videoDetails.author.name,
+        thumbnail: info.videoDetails.thumbnails[0].url,
+        audio: format.url,
+        id: info.videoDetails.videoId
       });
     } catch (error: any) {
       res.status(500).json({ status: false, error: error.message });
@@ -115,118 +35,35 @@ export async function registerRoutes(
     if (!url) return res.status(400).json({ status: false, error: "URL is required" });
 
     try {
-      console.log(`[Download] Starting for URL: ${url}`);
-      const videoData = await get_video_info(url);
-      console.log(`[Download] Metadata extracted: ${videoData.title}`);
-      let audioUrl = videoData.url;
-      
-      if (!audioUrl && videoData.formats) {
-        const audioFormats = videoData.formats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
-        if (audioFormats.length > 0) {
-          audioUrl = audioFormats.sort((a: any, b: any) => (b.abr || 0) - (a.abr || 0))[0].url;
-        }
-      }
-
-      if (!audioUrl) throw new Error("Could not get audio URL");
-
-      const title = videoData.title || 'audio';
+      console.log("Audio downloading..");
+      const info = await ytdl.getInfo(url);
+      const title = info.videoDetails.title;
       const asciiTitle = title.replace(/[^\x00-\x7F]/g, "").replace(/[^\w\s._-]/g, "").trim() || "audio";
 
       res.setHeader('Content-Disposition', `attachment; filename="${asciiTitle}.mp3"`);
       res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Transfer-Encoding', 'chunked');
 
-      console.log("Audio downloading..");
-      
-      const spawnWithFallback = (path: string, args: string[]) => {
-        const proc = spawn(path, args);
-        proc.on('error', (err) => {
-          if ((err as any).code === 'ENOENT' && path === 'yt-dlp') {
-            console.log("System yt-dlp not found, trying local ./yt-dlp");
-            const localProc = spawn('./yt-dlp', args);
-            // Setup local listeners here if needed, but for simplicity we rely on the primary piping
-            localProc.stdout.on('data', (chunk) => !res.writableEnded && res.write(chunk));
-            localProc.stdout.on('end', () => {
-              console.log("Seucefully download..");
-              console.log("Sent to api caller");
-              !res.writableEnded && res.end();
-            });
-            localProc.on('error', (e) => console.error("Local yt-dlp failed:", e));
-          }
-        });
-        return proc;
-      };
-
-      const ytArgs = [
-        '-o', '-',
-        '-f', 'bestaudio/best',
-        '--no-part',
-        '--buffer-size', '16K',
-        '--socket-timeout', '120',
-        '--no-warnings',
-        url
-      ];
-
-      const ytProcess = spawn('yt-dlp', ytArgs);
-
-      ytProcess.on('error', (err) => {
-        if ((err as any).code === 'ENOENT') {
-          const localProc = spawn('./yt-dlp', ytArgs);
-          localProc.stdout.on('data', (chunk) => !res.writableEnded && res.write(chunk));
-          localProc.stdout.on('end', () => {
-             console.log("Seucefully download..");
-             console.log("Sent to api caller");
-             !res.writableEnded && res.end();
-          });
-          return;
-        }
-        console.error('[Download] yt-dlp spawn error:', err);
-        if (!res.headersSent) res.status(500).json({ status: false, error: "Failed to start downloader" });
+      const stream = ytdl(url, {
+        quality: 'highestaudio',
+        filter: 'audioonly',
       });
 
-      ytProcess.stdout.on('data', (chunk) => {
-        if (!res.writableEnded) {
-          res.write(chunk);
-        }
-      });
+      stream.pipe(res);
 
-      ytProcess.stdout.on('end', () => {
+      stream.on('end', () => {
         console.log("Seucefully download..");
         console.log("Sent to api caller");
-        if (!res.writableEnded) {
-          res.end();
-        }
-      });
-      
-      ytProcess.on('error', (err) => {
-        console.error('[Download] yt-dlp spawn error:', err);
-        if (!res.headersSent) {
-          res.status(500).json({ status: false, error: "Failed to start downloader" });
-        }
       });
 
-      ytProcess.stderr.on('data', (data) => {
-        const message = data.toString();
-        if (message.includes('ERROR')) {
-          console.error(`[Download] yt-dlp error: ${message}`);
-        } else {
-          console.log(`[Download] yt-dlp progress: ${message.trim().split('\n')[0]}`);
+      stream.on('error', (err) => {
+        console.error('[Download] Error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ status: false, error: "Download failed" });
         }
       });
 
       res.on('close', () => {
-        console.log(`[Download] Client connection closed`);
-        if (ytProcess) {
-          ytProcess.stdout.unpipe();
-          ytProcess.kill('SIGTERM');
-        }
-      });
-
-      ytProcess.on('close', (code) => {
-        console.log(`[Download] yt-dlp exited with code ${code}`);
-        if (code !== 0 && !res.headersSent && !res.writableEnded) {
-          res.status(500).json({ status: false, error: "Downloader exited with error" });
-        }
+        stream.destroy();
       });
     } catch (error: any) {
       res.status(500).json({ status: false, error: error.message });
