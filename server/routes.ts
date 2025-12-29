@@ -36,29 +36,6 @@ export async function registerRoutes(
 
       process_info.on('error', (err) => {
         clearTimeout(timeout);
-        // If system command fails, try local path
-        if ((err as any).code === 'ENOENT') {
-          const localPath = './yt-dlp';
-          const localProcess = spawn(localPath, cmd.slice(1));
-          
-          localProcess.on('error', (localErr) => {
-            console.error('yt-dlp local spawn error:', localErr);
-            reject(localErr);
-          });
-          
-          let localStdout = '';
-          let localStderr = '';
-          
-          localProcess.stdout.on('data', (data) => localStdout += data);
-          localProcess.stderr.on('data', (data) => localStderr += data);
-          
-          localProcess.on('close', (code) => {
-            clearTimeout(timeout);
-            if (code !== 0) return reject(new Error(`yt-dlp local error: ${localStderr}`));
-            try { resolve(JSON.parse(localStdout)); } catch (e) { reject(e); }
-          });
-          return;
-        }
         console.error('yt-dlp info spawn error:', err);
         reject(err);
       });
