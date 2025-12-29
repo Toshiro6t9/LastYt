@@ -10,10 +10,8 @@ export async function registerRoutes(
 
   const get_video_info = (url: string): Promise<any> => {
     return new Promise((resolve, reject) => {
-      // Prioritize system-wide yt-dlp, fallback to local path
-      const ytDlpPath = 'yt-dlp';
       const cmd = [
-        ytDlpPath,
+        'yt-dlp',
         '-J',
         '--no-playlist',
         '--flat-playlist',
@@ -25,7 +23,7 @@ export async function registerRoutes(
         url
       ];
       
-      const process_info = spawn(ytDlpPath, cmd.slice(1));
+      const process_info = spawn('yt-dlp', cmd.slice(1));
       let stdout = '';
       let stderr = '';
 
@@ -102,7 +100,6 @@ export async function registerRoutes(
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Transfer-Encoding', 'chunked');
 
-      // Add flags to force stream output and disable any local caching
       const ytArgs = [
         '--no-cache-dir',
         '--no-mtime',
@@ -162,7 +159,6 @@ export async function registerRoutes(
     }
   });
 
-  // Health check/Root endpoint
   app.get('/', (req, res) => {
     res.json({
       status: "online",
@@ -175,7 +171,6 @@ export async function registerRoutes(
     });
   });
 
-  // Optional: History endpoint if we want to show recent plays
   app.get('/api/history', async (req, res) => {
     const history = await storage.getRecentDownloads();
     res.json(history);
