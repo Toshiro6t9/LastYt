@@ -1,13 +1,13 @@
 services:
   - type: web
-    name: youtube-audio-api
+    name: lastyt
     env: node
-    plan: free
     buildCommand: |
       npm install
+      # Download yt-dlp binary to the project root during build
       curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ./yt-dlp
       chmod a+rx ./yt-dlp
-    startCommand: npx tsx server/index.ts
+    startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production

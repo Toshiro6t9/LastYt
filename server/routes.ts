@@ -116,38 +116,54 @@ export async function registerRoutes(
       ];
 
       console.log(`Starting yt-dlp process for: ${url}`);
-      const ytProcess = spawn('yt-dlp', ytArgs);
+      // Try local ./yt-dlp first (for Render/local), then system 'yt-dlp'
+      let ytProcess;
+      try {
+        ytProcess = spawn('./yt-dlp', ytArgs);
+      } catch (e) {
+        ytProcess = spawn('yt-dlp', ytArgs);
+      }
+      
       let bytesSent = 0;
 
-      ytProcess.stdout.on('data', (chunk) => {
-        if (!res.writableEnded) {
-          res.write(chunk);
-          bytesSent += chunk.length;
-        }
-      });
-
-      ytProcess.stderr.on('data', (data) => {
-        const msg = data.toString();
-        if (msg.toLowerCase().includes('error')) {
-          console.error(`yt-dlp download error: ${msg}`);
-        }
-      });
-
-      ytProcess.on('close', (code) => {
-        console.log(`yt-dlp process closed with code ${code}. Total bytes sent: ${bytesSent}`);
-        if (code === 0 && bytesSent > 0) {
-          console.log("Seucefully download..");
-          console.log("Sent to api caller");
-        } else if (!res.writableEnded) {
-          console.error('Download failed or no data produced');
-        }
-        if (!res.writableEnded) res.end();
-      });
-
       ytProcess.on('error', (err) => {
+        if ((err as any).code === 'ENOENT' && ytProcess.spawnfile === './yt-dlp') {
+          ytProcess = spawn('yt-dlp', ytArgs);
+          setupProcessEvents(ytProcess);
+          return;
+        }
         console.error('yt-dlp process error:', err);
         if (!res.writableEnded) res.end();
       });
+
+      const setupProcessEvents = (proc: any) => {
+        proc.stdout.on('data', (chunk: Buffer) => {
+          if (!res.writableEnded) {
+            res.write(chunk);
+            bytesSent += chunk.length;
+          }
+        });
+
+        proc.stderr.on('data', (data: Buffer) => {
+          const msg = data.toString();
+          if (msg.toLowerCase().includes('error')) {
+            console.error(`yt-dlp download error: ${msg}`);
+          }
+        });
+
+        proc.on('close', (code: number) => {
+          console.log(`yt-dlp process closed with code ${code}. Total bytes sent: ${bytesSent}`);
+          if (code === 0 && bytesSent > 0) {
+            console.log("Seucefully download..");
+            console.log("Sent to api caller");
+          } else if (!res.writableEnded) {
+            console.error('Download failed or no data produced');
+          }
+          if (!res.writableEnded) res.end();
+        });
+      };
+
+      setupProcessEvents(ytProcess);
 
       res.on('close', () => {
         if (ytProcess && !ytProcess.killed) {
