@@ -142,7 +142,7 @@ export async function registerRoutes(
       ];
 
       console.log(`Starting yt-dlp process for: ${url}`);
-      const ytProcess = spawn('./yt-dlp', ytArgs);
+      const ytProcess = spawn('yt-dlp', ytArgs);
       let bytesSent = 0;
 
       ytProcess.stdout.on('data', (chunk) => {
